@@ -1,5 +1,7 @@
 ﻿using HanuEdmsApi.Converter;
 using HanuEdmsApi.EF;
+using HanuEdmsApi.Exceptions;
+using HanuEdmsApi.Helpers;
 using HanuEdmsApi.Models;
 using HanuEdmsApi.ViewModels;
 using Microsoft.AspNetCore.Mvc;
@@ -23,24 +25,40 @@ namespace HanuEdmsApi.Controllers
         }
 
         [HttpGet]
-        public IEnumerable<TuitionFee> GetTuitionFeesForStudent([FromQuery] int studentId, [FromQuery] string authToken)
+        public IActionResult GetTuitionFeesForStudent([FromQuery] string authToken)
         {
             // authenticate
+            string username = JwtUtils.ValidateJWT(authToken);
+            if (username is null)
+            {
+                return Unauthorized(new MissingAuthTokenException());
+            }
 
-            return Context.Student
-                    .Include(s => s.Registration).ThenInclude(r => r.FeeLine).ThenInclude(f => f.Course)
+            int studentId = int.Parse(username);
+
+            return new JsonResult(Context.Student
+                    .Include(s => s.Registration)
+                        .ThenInclude(r => r.FeeLine)
+                        .ThenInclude(f => f.Course)
                     .Where(s => s.Id == studentId)
                     .FirstOrDefault()
                     ?.Registration
                     .SelectMany(r => r.FeeLine)
                     .Select(f => Converter.ForwardConverter(f))
-                    .ToList();
+                    .ToList());
         }
 
         [HttpPost]
-        public void MockPayTuitionFee([FromQuery] int semester, [FromQuery] int studentId, [FromQuery] string authToken)
+        public IActionResult MockPayTuitionFee([FromQuery] int semester, [FromQuery] string authToken)
         {
             // authenticate
+            string username = JwtUtils.ValidateJWT(authToken);
+            if (username is null)
+            {
+                return Unauthorized(new MissingAuthTokenException());
+            }
+
+            int studentId = int.Parse(username);
 
             FeeLine[] tuitionFeeLines = Context.Student
                                             .Include(s => s.Registration)
@@ -51,13 +69,14 @@ namespace HanuEdmsApi.Controllers
                                             .Where(r => r.SemesterId == semester)
                                             .SelectMany(r => r.FeeLine)
                                             .ToArray();
-            
+            System.Console.WriteLine(tuitionFeeLines.Length);
             foreach (var feeLine in tuitionFeeLines)
             {
                 feeLine.MarkAsPaid();
             }
             Context.FeeLine.UpdateRange(tuitionFeeLines);
             Context.SaveChanges();
+            return Ok();
         }
     }
 }
